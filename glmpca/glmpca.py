@@ -82,8 +82,6 @@ class GlmpcaFamily(object):
         elif self.glm_family in ("mult","bern"):
             self.family = smf.Binomial()
 
-            if self.glm_family == "mult" and mult_n is None:
-                raise GlmpcaError("Multinomial sample size parameter vector 'mult_n' must be specified")
         else:
             raise GlmpcaError("unrecognized family type")
 
@@ -113,6 +111,8 @@ class GlmpcaFamily(object):
         sz is ignored unless fam is 'poi' or 'nb'
         """
         self.mult_n = colSums(Y) if self.glm_family == "mult" else None
+        if self.glm_family == "mult" and self.mult_n is None:
+            raise GlmpcaError("Multinomial sample size parameter vector 'mult_n' must be specified")
 
         if self.glm_family in ("poi","nb"):
             self.sz = colMeans(Y) if not sz else sz
@@ -145,11 +145,11 @@ class GlmpcaFamily(object):
 
         elif self.glm_family == "mult":
             P = self.ilfunc(R) #ilfunc=expit, P very small probabilities
-            return {"grad":Y-(self.mult_n*P),"info":self.mult_n*vfunc(P)}
+            return {"grad":Y-(self.mult_n*P),"info":self.mult_n*self.vfunc(P)}
 
         elif self.glm_family == "bern":
             P = self.ilfunc(R)
-            return {"grad":Y-P,"info":vfunc(P)}
+            return {"grad":Y-P,"info":self.vfunc(P)}
 
         else: #this is not actually used but keeping for future reference
             #this is most generic formula for GLM but computationally slow
@@ -354,7 +354,7 @@ class GlmPCA(_BasePCA):
             raise GlmpcaError("for Bernoulli model, the maximum value must be <=1")
 
         #preprocess covariates and set updateable indices
-        if X:
+        if X is not None:
             if nrow(X) != ncol(Y):
                 raise GlmpcaError("X rows must match columns of Y")
             #we force an intercept, so remove it from X to prevent collinearity
@@ -363,7 +363,7 @@ class GlmPCA(_BasePCA):
             X= np.zeros((N,0)) #empty array to prevent dim mismatch errors with hstack later
         Ko= ncol(X)+1
 
-        if Z:
+        if Z is not None:
             if nrow(Z) != nrow(Y):
                 raise GlmpcaError("Z rows must match rows of Y")
         else:
