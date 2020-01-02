@@ -441,6 +441,7 @@ class GlmPCA(_BasePCA):
 
 if __name__=="__main__":
     from numpy import array,exp,random,repeat
+    np.random.seed(1)
     mu= exp(random.randn(20,100))
     mu[range(10),:] *= exp(random.randn(100))
     clust= repeat(["red","black"],10)
@@ -448,6 +449,7 @@ if __name__=="__main__":
     glmpca = GlmPCA(n_components=2, family='nb', verbose=True) 
     glmpca.fit(Y.T)
     print(glmpca.factors)
+    print(glmpca.dev)
     #from matplotlib.pyplot import scatter
     #%pylab
     #scatter(factors[:,0],factors[:,1],c=clust)
