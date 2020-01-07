@@ -114,7 +114,7 @@ class GlmpcaFamily(object):
             raise GlmpcaError("Multinomial sample size parameter vector 'mult_n' must be specified")
 
         if self.glm_family in ("poi","nb"):
-            self.sz = colMeans(Y) if not sz else sz
+            self.sz = colMeans(Y) if sz is not None else sz
             self.offsets = self.family.link(self.sz)
             self.rfunc = lambda U,V: self.offsets + tcrossprod(V,U) #linear predictor
             self.intercepts = self.family.link(rowSums(Y)/np.sum(self.sz))
