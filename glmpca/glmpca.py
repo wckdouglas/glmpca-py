@@ -351,6 +351,9 @@ class GlmPCA():
 
         if np.min(Y)<0:
             raise GlmpcaError("for count data, the minimum value must be >=0")
+
+        if np.any(np.max(Y, axis=1) == 0 ): #matching R version glmpca
+            raise GlmpcaError('Some rows were all zero, please remove them.')
         
         if self.family=="bern" and np.max(Y)>1:
             raise GlmpcaError("for Bernoulli model, the maximum value must be <=1")
