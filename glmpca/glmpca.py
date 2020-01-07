@@ -7,7 +7,6 @@ from scipy.special import digamma,polygamma
 import statsmodels.api as sm
 import statsmodels.genmod.families as smf
 from decimal import Decimal
-from sklearn.decomposition.base import _BasePCA 
 
 def trigamma(x):
     return polygamma(1,x)
@@ -215,11 +214,10 @@ def est_nb_theta(y,mu,th):
   #exp(u+sign(grad)*min(maxstep,abs(grad)))
 
 
-class GlmPCA(_BasePCA):
+class GlmPCA():
     
-    def __init__(self, n_components=1, family="poi", 
-            ctl = {"maxIter":1000, "eps":1e-4}, penalty = 1,
-            verbose = False, init = {"factors": None, "loadings":None},
+    def __init__(self, n_components=1, family="poi", maxiter = 1000,eps=1e-4,
+            penalty = 1, verbose = False, init = {"factors": None, "loadings":None},
             nb_theta = 100):
 
         """
@@ -231,15 +229,14 @@ class GlmPCA(_BasePCA):
 
         Parameters
         ----------
-        Y: array_like of count data with features as rows and observations as
-            columns.
         n_components: the desired number of latent dimensions (integer).
-        fam: string describing the likelihood to use for the data. Possible values include:
+        family: string describing the likelihood to use for the data. Possible values include:
         - poi: Poisson
         - nb: negative binomial
         - mult: binomial approximation to multinomial
         - bern: Bernoulli
-        ctl: a dictionary of control parameters for optimization.
+        maxiter: Maximum number of iterations to perform.
+        eps: Convergence criterion for the mode-finding procedure. The algorithm is considered to have converged if the relative differences in all parameters from one iteration to the next are less than eps--that is, if all(abs(new-old)<eps*abs(old)).
         penalty: the L2 penalty for the latent factors (default = 1).
             Regression coefficients are not penalized.
         verbose: logical value indicating whether the current deviance should
@@ -249,6 +246,9 @@ class GlmPCA(_BasePCA):
         nb_theta: negative binomial dispersion parameter. Smaller values mean more dispersion
             if nb_theta goes to infinity, this is equivalent to Poisson
             Note that the alpha in the statsmodels package is 1/nb_theta.
+
+        Y: array_like of count data with features as rows and observations as
+            columns.
         X: array_like of column (observations) covariates. Any column with all
             same values (eg. 1 for intercept) will be removed. This is because we force
             the intercept and want to avoid collinearity.
@@ -287,10 +287,12 @@ class GlmPCA(_BasePCA):
         """
         #For negative binomial, convergence only works if starting with nb_theta large
 
-        assert family in ["poi","nb","mult","bern"], 'Invalid GLM family'
+        if family not in {"poi","nb","mult","bern"}:
+            raise GlmpcaError('Invalid GLM family')
         self.n_components = n_components
         self.family = family
-        self.ctl = ctl 
+        self.maxiter = maxiter
+        self.eps = eps
         self.penalty = penalty
         self.verbose = verbose 
         self.init = {"factors": None, "loadings":None}
@@ -330,8 +332,8 @@ class GlmPCA(_BasePCA):
             loadings= V
         else: #G is not empty
             betaz = np.linalg.lstsq(Z,V,rcond=None)[0] #extract coef from linreg
-            loadings= V-Z@betaz #residuals from regression
-            G+= tcrossprod(factors,betaz)
+            loadings = V-Z@betaz #residuals from regression
+            G += tcrossprod(factors,betaz)
         #rotate factors to make loadings orthornormal
         loadings,d,Qt = np.linalg.svd(loadings,full_matrices=False)
         factors = tcrossprod(factors,Qt)*d #d vector broadcasts across cols
@@ -347,7 +349,7 @@ class GlmPCA(_BasePCA):
         Y = np.array(Y)
         J,N = Y.shape
 
-        if self.family in ("poi","nb","mult","bern") and np.min(Y)<0:
+        if np.min(Y)<0:
             raise GlmpcaError("for count data, the minimum value must be >=0")
         
         if self.family=="bern" and np.max(Y)>1:
@@ -382,8 +384,6 @@ class GlmPCA(_BasePCA):
 
         self.gf.initialize(Y, sz=sz)
         
-
-    
         #initialize U,V, with row-specific intercept terms
         U= np.hstack((cvec1(N), X, np.random.randn(N,Ku)*1e-5/Ku))
         if self.init["factors"] is not None:
@@ -398,13 +398,13 @@ class GlmPCA(_BasePCA):
             V[:,(Ko+Kf)+np.array(range(L0))] = self.init["loadings"][:,range(L0)]
 
         #run optimization
-        dev = np.repeat(np.nan,self.ctl["maxIter"])
-        for t in range(self.ctl["maxIter"]):
+        dev = np.repeat(np.nan,self.maxiter)
+        for t in range(self.maxiter):
             dev[t]= self.gf.dev_func(Y, self.gf.rfunc(U,V))
             if not np.isfinite(dev[t]):
                 raise GlmpcaError("Numerical divergence (deviance no longer finite), '\
                                 'try increasing the penalty to improve stability of optimization.")
-            if t>4 and np.abs(dev[t]-dev[t-1])/(0.1+np.abs(dev[t-1]))<self.ctl["eps"]:
+            if t>4 and np.abs(dev[t]-dev[t-1])/(0.1+np.abs(dev[t-1]))<self.eps:
                 break
             if self.verbose:
                 msg = "Iteration: {:d} | deviance={:.4E}".format(t,Decimal(dev[t]))
