@@ -70,6 +70,16 @@ class Test_glmpca(unittest.TestCase):
         Y[0,0] = -1
         g1 = GlmPCA(n_components = 2, family = 'poi')
         self.assertRaises(GlmpcaError, g1.fit, Y)
+    
+
+    def test_glmpca(self):
+        np.random.seed(1)
+        mu= np.exp(np.random.randn(20,100))
+        mu[range(10),:] *= np.exp(np.random.randn(100))
+        clust= np.repeat(["red","black"],10)
+        Y= np.random.poisson(mu)
+        glmpca = GlmPCA(n_components=2, family='nb', verbose=True) 
+        glmpca.fit(Y.T)
 # the below test doesn't work because the log link function implemented by statmodels...
 #...clips the inputs to an epsilon >0 so log(0) ends up being about -36.
 # so the zero rows don't raise an error like they do in R.

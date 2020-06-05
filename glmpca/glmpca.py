@@ -4,8 +4,11 @@ Python implementation of the generalized PCA for dimension reduction of non-norm
 import numpy as np
 from scipy.special import digamma,polygamma
 from decimal import Decimal
+import logging
 from .glm_family import GlmPcaFamily
 from .utils import GlmpcaError
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger('GlM-PCA')
 
 def trigamma(x):
     return polygamma(1,x)
@@ -255,7 +258,7 @@ class GlmPCA():
                 msg = "Iteration: {:d} | deviance={:.4E}".format(t,Decimal(dev[t]))
                 if self.family == "nb": 
                     msg += " | nb_theta: {:.3E}".format(self.nb_theta)
-                print(msg)
+                logger.info(msg)
 
             #(k in lid) ensures no penalty on regression coefficients:
             for k in vid:
@@ -281,20 +284,3 @@ class GlmPCA():
         A = V[:,range(Ko)]
         self.ortho(U[:,lid],V[:,lid],A,X=X,G=G,Z=Z)
         self.dev = dev[range(t+1)]
-
-
-
-if __name__=="__main__":
-    from numpy import array,exp,random,repeat
-    np.random.seed(1)
-    mu= exp(random.randn(20,100))
-    mu[range(10),:] *= exp(random.randn(100))
-    clust= repeat(["red","black"],10)
-    Y= random.poisson(mu)
-    glmpca = GlmPCA(n_components=2, family='nb', verbose=True) 
-    glmpca.fit(Y.T)
-    print(glmpca.factors)
-    print(glmpca.dev)
-    #from matplotlib.pyplot import scatter
-    #%pylab
-    #scatter(factors[:,0],factors[:,1],c=clust)
