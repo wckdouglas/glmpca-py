@@ -11,42 +11,15 @@ from decimal import Decimal
 def trigamma(x):
     return polygamma(1,x)
 
-def rowSums(x):
-    return x.sum(axis=1)
-
-def rowMeans(x):
-    return x.mean(axis=1)
-
-def colSums(x):
-    return x.sum(axis=0)
-
-def colMeans(x):
-    return x.mean(axis=0)
 
 def colNorms(x):
     """
     compute the L2 norms of columns of an array
     """
-    return np.sqrt(colSums(x**2))
-
-def ncol(x):
-    return x.shape[1]
-
-def nrow(x):
-    return x.shape[0]
-
-def crossprod(A,B):
-    return (A.T)@B
-
-def tcrossprod(A,B):
-    return A@(B.T)
-
-def cvec1(n):
-    """returns a column vector of ones with length N"""
-    return np.ones((n,1))
+    return np.sqrt(x.sum(axis=0)**2)
 
 def remove_intercept(X):
-    cm = colMeans(X)
+    cm = X.mean(axis=0)
     try:
         X-= cm
     except TypeError as err:
@@ -55,7 +28,6 @@ def remove_intercept(X):
         else:
             raise err
     return X[:,colNorms(X)>1e-12]
-
 
 class GlmpcaError(ValueError):
   pass
@@ -109,23 +81,23 @@ class GlmpcaFamily(object):
         sz optional vector of size factors, default: sz=colMeans(Y) or colSums(Y)
         sz is ignored unless fam is 'poi' or 'nb'
         """
-        self.mult_n = colSums(Y) if self.glm_family == "mult" else None
+        self.mult_n = Y.sum(axis=0) if self.glm_family == "mult" else None
         if self.glm_family == "mult" and self.mult_n is None:
             raise GlmpcaError("Multinomial sample size parameter vector 'mult_n' must be specified")
 
         if self.glm_family in ("poi","nb"):
-            self.sz = colMeans(Y) if sz is not None else sz
+            self.sz = Y.mean(axis=0) if sz is None else sz
             self.offsets = self.family.link(self.sz)
-            self.rfunc = lambda U,V: self.offsets + tcrossprod(V,U) #linear predictor
-            self.intercepts = self.family.link(rowSums(Y)/np.sum(self.sz))
+            self.rfunc = lambda U,V: self.offsets + V.dot(U.T) #linear predictor
+            self.intercepts = self.family.link(Y.sum(axis=1)/np.sum(self.sz))
 
         else:
             self.offsets = 0
-            self.rfunc= lambda U,V: tcrossprod(V,U)
+            self.rfunc= lambda U,V: V.dot(U.T)
             if self.glm_family=="mult": #offsets incorporated via family object
-                self.intercepts = self.family.link(rowSums(Y)/np.sum(self.mult_n))
+                self.intercepts = self.family.link(Y.sum(axis=1)/np.sum(self.mult_n))
             else: #no offsets (eg, bernoulli)
-                self.intercepts = self.family.link(rowMeans(Y))
+                self.intercepts = self.family.link(Y.mean(axis=1))
 
         if np.any(np.isinf(self.intercepts)):
             raise GlmpcaError("Some rows were all zero, please remove them.")
@@ -189,29 +161,29 @@ class GlmpcaFamily(object):
 
 
 def est_nb_theta(y,mu,th):
-  """
-  given count data y and predicted means mu>0, and a neg binom theta "th"
-  use Newton's Method to update theta based on the negative binomial likelihood
-  note this uses observed rather than expected information
-  regularization:
-  let u=log(theta). We use the prior u~N(0,1) as penalty
-  equivalently we assume theta~lognormal(0,1) so the mode is at 1 (geometric distr)
-  dtheta/du=e^u=theta
-  d2theta/du2=theta
-  dL/dtheta * dtheta/du
-  """
-  #n= length(y)
-  u= log(th)
-  #dL/dtheta*dtheta/du
-  score=  th*np.sum(digamma(th+y)-digamma(th)+log(th)+1-log(th+mu)-(y+th)/(mu+th))
-  #d^2L/dtheta^2 * (dtheta/du)^2
-  info1=  -(th**2)*np.sum(trigamma(th+mu)-trigamma(th)+1/th-2/(mu+th)+(y+th)/(mu+th)**2)
-  #dL/dtheta*d^2theta/du^2 = score
-  info=  info1-score
-  #L2 penalty on u=log(th)
-  return np.exp(u+(score-u)/(info+1))
-  #grad= score-u
-  #exp(u+sign(grad)*min(maxstep,abs(grad)))
+    """
+    given count data y and predicted means mu>0, and a neg binom theta "th"
+    use Newton's Method to update theta based on the negative binomial likelihood
+    note this uses observed rather than expected information
+    regularization:
+    let u=log(theta). We use the prior u~N(0,1) as penalty
+    equivalently we assume theta~lognormal(0,1) so the mode is at 1 (geometric distr)
+    dtheta/du=e^u=theta
+    d2theta/du2=theta
+    dL/dtheta * dtheta/du
+    """
+    #n= length(y)
+    u= log(th)
+    #dL/dtheta*dtheta/du
+    score=  th*np.sum(digamma(th+y)-digamma(th)+log(th)+1-log(th+mu)-(y+th)/(mu+th))
+    #d^2L/dtheta^2 * (dtheta/du)^2
+    info1=  -(th**2)*np.sum(trigamma(th+mu)-trigamma(th)+1/th-2/(mu+th)+(y+th)/(mu+th)**2)
+    #dL/dtheta*d^2theta/du^2 = score
+    info=  info1-score
+    #L2 penalty on u=log(th)
+    return np.exp(u+(score-u)/(info+1))
+    #grad= score-u
+    #exp(u+sign(grad)*min(maxstep,abs(grad)))
 
 
 class GlmPCA():
@@ -313,12 +285,12 @@ class GlmPCA():
         imputed expression: E[Y] = g^{-1}(R) where R = VU'+AX'+ZG'
         """
         if np.all(X==1): 
-            X = cvec1(nrow(U))
+            X = np.ones((U.shape[0],1))
 
         if np.all(Z==0): 
-            Z = np.zeros((nrow(V),1))
+            Z = np.zeros((V.shape[0],1))
 
-        L= ncol(U)
+        L = U.shape[1]
         if np.all(G==0): 
             G= None
         #we assume A is not null or zero
@@ -326,17 +298,17 @@ class GlmPCA():
         #at minimum, this will cause factors to have mean zero
         betax = np.linalg.lstsq(X,U,rcond=None)[0] #extract coef from linreg
         factors = U-X@betax #residuals from linear regression
-        A += tcrossprod(V,betax)
+        A += V.dot(betax.T)
         #remove correlation between V and G
         if G is None:
             loadings= V
         else: #G is not empty
             betaz = np.linalg.lstsq(Z,V,rcond=None)[0] #extract coef from linreg
             loadings = V-Z@betaz #residuals from regression
-            G += tcrossprod(factors,betaz)
+            G += factors.dot(betaz.T)
         #rotate factors to make loadings orthornormal
         loadings,d,Qt = np.linalg.svd(loadings,full_matrices=False)
-        factors = tcrossprod(factors,Qt)*d #d vector broadcasts across cols
+        factors = factors.dot(Qt.T)*d #d vector broadcasts across cols
         #arrange latent dimensions in decreasing L2 norm
         o = (-colNorms(factors)).argsort()
         self.factors = factors[:,o]
@@ -352,7 +324,7 @@ class GlmPCA():
         if np.min(Y)<0:
             raise GlmpcaError("for count data, the minimum value must be >=0")
 
-        if np.any(np.max(Y, axis=1) == 0 ): #matching R version glmpca
+        if np.any(np.max(Y, axis=1)) == 0 : #matching R version glmpca
             raise GlmpcaError('Some rows were all zero, please remove them.')
         
         if self.family=="bern" and np.max(Y)>1:
@@ -360,23 +332,23 @@ class GlmPCA():
 
         #preprocess covariates and set updateable indices
         if X is not None:
-            if nrow(X) != ncol(Y):
+            if X.shape[0] != Y.shape[1]:
                 raise GlmpcaError("X rows must match columns of Y")
             #we force an intercept, so remove it from X to prevent collinearity
             X= remove_intercept(X)
         else:
             X= np.zeros((N,0)) #empty array to prevent dim mismatch errors with hstack later
-        Ko= ncol(X)+1
+        Ko= X.shape[1]+1
 
         if Z is not None:
-            if nrow(Z) != nrow(Y):
+            if Z.shape[0] != Y.shape[0]:
                 raise GlmpcaError("Z rows must match rows of Y")
         else:
             Z = np.zeros((J,0)) #empty array to prevent dim mismatch errors with hstack later
-        Kf= ncol(Z)
+        Kf= Z.shape[1]
 
 
-        if sz is not None and len(sz) != ncol(Y):
+        if sz is not None and len(sz) != Y.shape[1]:
             raise GlmpcaError("size factor must have length equal to columns of Y")
 
         lid= (Ko + Kf)+np.array(range(self.n_components))
@@ -388,16 +360,16 @@ class GlmPCA():
         self.gf.initialize(Y, sz=sz)
         
         #initialize U,V, with row-specific intercept terms
-        U= np.hstack((cvec1(N), X, np.random.randn(N,Ku)*1e-5/Ku))
+        U= np.hstack((np.ones((N,1)), X, np.random.randn(N,Ku)*1e-5/Ku))
         if self.init["factors"] is not None:
-            L0= np.min([self.n_components,ncol(self.init["factors"])])
+            L0= np.min([self.n_components, self.init["factors"].shape[1]])
             U[:,(Ko+Kf)+np.array(range(L0))]= self.init["factors"][:,range(L0)]
         #a1 = naive MLE for gene intercept only, must convert to column vector first with [:,None]
         V= np.hstack((self.gf.intercepts[:,None], np.random.randn(J,(Ko-1))*1e-5/Kv))
         #note in the above line the randn can be an empty array if Ko=1, which is OK!
         V= np.hstack((V, Z, np.random.randn(J, self.n_components)*1e-5/Kv))
         if self.init["loadings"] is not None:
-            L0= np.min([self.n_components,ncol(self.init["loadings"])])
+            L0= np.min([self.n_components, self.init["loadings"].shape[1]])
             V[:,(Ko+Kf)+np.array(range(L0))] = self.init["loadings"][:,range(L0)]
 
         #run optimization
@@ -424,8 +396,8 @@ class GlmPCA():
 
             for k in uid:
                 ig = self.gf.infograd(Y, self.gf.rfunc(U,V))
-                grads = crossprod(ig["grad"], V[:,k]) - self.penalty*U[:,k]*(k in lid)
-                infos = crossprod(ig["info"], V[:,k]**2) + self.penalty*(k in lid)
+                grads = ig["grad"].T.dot(V[:,k]) - self.penalty*U[:,k]*(k in lid)
+                infos = ig["info"].T.dot(V[:,k]**2) + self.penalty*(k in lid)
                 U[:,k] += grads/infos
 
             if self.family == "nb":
@@ -434,8 +406,8 @@ class GlmPCA():
                 self.gf = GlmpcaFamily(glm_family = self.family, nb_theta = self.nb_theta)
                 self.gf.initialize(Y, sz=sz)
         #postprocessing: include row and column labels for regression coefficients
-        G = None if ncol(Z)==0 else U[:,Ko+np.array(range(Kf))]
-        X = np.hstack((cvec1(N),X))
+        G = None if Z.shape[1]==0 else U[:,Ko+np.array(range(Kf))]
+        X = np.hstack((np.ones((N,1)),X))
         A = V[:,range(Ko)]
         self.ortho(U[:,lid],V[:,lid],A,X=X,G=G,Z=Z)
         self.dev = dev[range(t+1)]
