@@ -2,11 +2,9 @@
 Python implementation of the generalized PCA for dimension reduction of non-normally distributed data. The original R implementation is at https://github.com/willtownes/glmpca
 """
 import numpy as np
-from numpy import log
 from scipy.special import digamma,polygamma
-import statsmodels.api as sm
-import statsmodels.genmod.families as smf
 from decimal import Decimal
+from .glm_family import GlmPcaFamily
 
 def trigamma(x):
     return polygamma(1,x)
@@ -33,132 +31,6 @@ class GlmpcaError(ValueError):
   pass
 
 
-class GlmpcaFamily(object):
-    """thin wrapper around the statsmodels.genmod.families.Family class"""
-    # TO DO: would it be better to use inheritance?
-    def __init__(self, glm_family=None, nb_theta=None):
-
-        assert glm_family in ["poi","nb","mult","bern"], 'Invalid GLM family'
-        self.glm_family = glm_family
-        self.nb_theta = nb_theta
-
-        if self.glm_family == "poi":
-            self.family=smf.Poisson()
-
-        elif self.glm_family == "nb":
-            if self.nb_theta is None:
-                raise GlmpcaError("Negative binomial dispersion parameter 'nb_theta' must be specified")
-            self.family= smf.NegativeBinomial(alpha=1/nb_theta)
-
-        elif self.glm_family in ("mult","bern"):
-            self.family = smf.Binomial()
-
-        else:
-            raise GlmpcaError("unrecognized family type")
-
-        #variance function, determined by GLM family
-        self.vfunc= self.family.variance
-        #inverse link func, mu as a function of linear predictor R
-        self.ilfunc= self.family.link.inverse
-        #derivative of inverse link function, dmu/dR
-        self.hfunc= self.family.link.inverse_deriv
-
-        # define variables define later
-        self.rfunc = None
-        self.offset = None
-        self.multi_n = None
-        self.nb_theta = None
-        self.intercepts = None
-        self.sz = None
-
-
-    def initialize(self, Y, sz = None):
-        """
-        create the glmpca_family object and
-        initialize the A array (regression coefficients of X)
-        Y is the data (JxN array)
-        fam is the likelihood
-        sz optional vector of size factors, default: sz=colMeans(Y) or colSums(Y)
-        sz is ignored unless fam is 'poi' or 'nb'
-        """
-        self.mult_n = Y.sum(axis=0) if self.glm_family == "mult" else None
-        if self.glm_family == "mult" and self.mult_n is None:
-            raise GlmpcaError("Multinomial sample size parameter vector 'mult_n' must be specified")
-
-        if self.glm_family in ("poi","nb"):
-            self.sz = Y.mean(axis=0) if sz is None else sz
-            self.offsets = self.family.link(self.sz)
-            self.rfunc = lambda U,V: self.offsets + V.dot(U.T) #linear predictor
-            self.intercepts = self.family.link(Y.sum(axis=1)/np.sum(self.sz))
-
-        else:
-            self.offsets = 0
-            self.rfunc= lambda U,V: V.dot(U.T)
-            if self.glm_family=="mult": #offsets incorporated via family object
-                self.intercepts = self.family.link(Y.sum(axis=1)/np.sum(self.mult_n))
-            else: #no offsets (eg, bernoulli)
-                self.intercepts = self.family.link(Y.mean(axis=1))
-
-        if np.any(np.isinf(self.intercepts)):
-            raise GlmpcaError("Some rows were all zero, please remove them.")
-
-
-
-    def infograd(self, Y, R):
-        if self.glm_family == "poi":
-            M = self.ilfunc(R) #ilfunc=exp
-            return {"grad":(Y-M),"info":M}
-
-        elif self.glm_family == "nb":
-            M = self.ilfunc(R) #ilfunc=exp
-            W = 1/self.vfunc(M)
-            return {"grad":(Y-M)*W*M,"info":W*(M**2)}
-
-        elif self.glm_family == "mult":
-            P = self.ilfunc(R) #ilfunc=expit, P very small probabilities
-            return {"grad":Y-(self.mult_n*P),"info":self.mult_n*self.vfunc(P)}
-
-        elif self.glm_family == "bern":
-            P = self.ilfunc(R)
-            return {"grad":Y-P,"info":self.vfunc(P)}
-
-        else: #this is not actually used but keeping for future reference
-            #this is most generic formula for GLM but computationally slow
-            raise GlmpcaError("invalid fam")
-            M= self.ilfunc(R)
-            W= 1/self.vfunc(M)
-            H= self.hfunc(R)
-            return {"grad":(Y-M)*W*H,"info":W*(H**2)}
-
-
-    def dev_func(self, Y, R):
-        #create deviance function
-        if self.glm_family == "mult":
-            return self.mat_binom_dev(Y,self.ilfunc(R),self.mult_n)
-        else:
-            return self.family.deviance(Y,self.ilfunc(R))
-
-
-    def __str__(self):
-        return "GlmpcaFamily object of type {}".format(self.family)
-
-
-    def mat_binom_dev(self, X,P,n):
-        """
-        binomial deviance for two arrays
-        X,P are JxN arrays
-        n is vector of length N (same as cols of X,P)
-        """
-        with np.errstate(divide='ignore',invalid='ignore'):
-            term1= X*log(X/(n*P))
-        term1= term1[np.isfinite(term1)].sum()
-        #nn= x<n
-        nx= n-X
-        with np.errstate(divide='ignore',invalid='ignore'):
-            term2= nx*log(nx/(n*(1-P)))
-        term2= term2[np.isfinite(term2)].sum()
-        return 2*(term1+term2)
-
 
 def est_nb_theta(y,mu,th):
     """
@@ -173,9 +45,9 @@ def est_nb_theta(y,mu,th):
     dL/dtheta * dtheta/du
     """
     #n= length(y)
-    u= log(th)
+    u= np.log(th)
     #dL/dtheta*dtheta/du
-    score=  th*np.sum(digamma(th+y)-digamma(th)+log(th)+1-log(th+mu)-(y+th)/(mu+th))
+    score=  th*np.sum(digamma(th+y)-digamma(th)+np.log(th)+1-np.log(th+mu)-(y+th)/(mu+th))
     #d^2L/dtheta^2 * (dtheta/du)^2
     info1=  -(th**2)*np.sum(trigamma(th+mu)-trigamma(th)+1/th-2/(mu+th)+(y+th)/(mu+th)**2)
     #dL/dtheta*d^2theta/du^2 = score
@@ -269,7 +141,7 @@ class GlmPCA():
         self.verbose = verbose 
         self.init = {"factors": None, "loadings":None}
         self.nb_theta = nb_theta
-        self.gf = GlmpcaFamily(glm_family=family, nb_theta=self.nb_theta)
+        self.gf = GlmPcaFamily(glm_family=family, nb_theta=self.nb_theta)
         self.sz = None
 
 
@@ -403,7 +275,7 @@ class GlmPCA():
             if self.family == "nb":
                 self.nb_theta = est_nb_theta(Y, 
                         self.gf.family.link.inverse(self.gf.rfunc(U,V)), self.nb_theta)
-                self.gf = GlmpcaFamily(glm_family = self.family, nb_theta = self.nb_theta)
+                self.gf = GlmPcaFamily(glm_family = self.family, nb_theta = self.nb_theta)
                 self.gf.initialize(Y, sz=sz)
         #postprocessing: include row and column labels for regression coefficients
         G = None if Z.shape[1]==0 else U[:,Ko+np.array(range(Kf))]

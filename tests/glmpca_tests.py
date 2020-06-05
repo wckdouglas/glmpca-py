@@ -5,7 +5,8 @@ nosetests --with-coverage --cover-erase --cover-package=glmpca
 
 import unittest
 import numpy as np
-from glmpca.glmpca import GlmPCA, GlmpcaFamily, GlmpcaError
+from glmpca.glmpca import GlmPCA, GlmpcaError
+from glmpca.glm_family import GlmPcaFamily
 np.random.seed(202)
 
 class Test_glmpca(unittest.TestCase):
@@ -18,7 +19,7 @@ class Test_glmpca(unittest.TestCase):
 
     def test_glmpca_output_data_types(self):
         #self.assertIsInstance(self.g1, dict)
-        self.assertIsInstance(self.g1.gf, GlmpcaFamily)
+        self.assertIsInstance(self.g1.gf, GlmPcaFamily)
         self.assertTrue(np.all(self.g1.factors.shape == (5,2)))
         self.assertTrue(np.all(self.g1.loadings.shape == (10,2)))
 
