@@ -5,6 +5,7 @@ import numpy as np
 from scipy.special import digamma,polygamma
 from decimal import Decimal
 from .glm_family import GlmPcaFamily
+from .utils import GlmpcaError
 
 def trigamma(x):
     return polygamma(1,x)
@@ -26,9 +27,6 @@ def remove_intercept(X):
         else:
             raise err
     return X[:,colNorms(X)>1e-12]
-
-class GlmpcaError(ValueError):
-  pass
 
 
 
